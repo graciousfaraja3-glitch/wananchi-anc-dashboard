@@ -838,17 +838,16 @@ with tabs[4]:
     )
 
 
-    required = [
-        "Age",
-        "Parity_clean",
-        "Gravidity",
-        "Gestation Weeks",
-        "Visit Count",
-        "Weight (kg)",
-        "Systolic BP",
-        "Diastolic BP",
-        "Year"
-    ]
+   required = [
+    "Age",
+    "Gravidity",
+    "Gestation Weeks",
+    "Visit Count",
+    "Weight (kg)",
+    "Systolic BP",
+    "Diastolic BP",
+    "Year"
+]
 
     missing_required = [
         c for c in required
@@ -864,16 +863,7 @@ with tabs[4]:
             + ", ".join(missing_required)
         )
 
-        if (
-            "Parity_clean" not in df.columns
-            and "Parity" not in df.columns
-        ):
-
-            st.info(
-                "The current CSV does not contain either 'Parity_clean' "
-                "or 'Parity'. The other dashboard tabs can still work."
-            )
-
+      
 
     else:
 
@@ -906,16 +896,15 @@ with tabs[4]:
             )
 
 
-            formula = """
-                Age ~ Parity_clean
-                + Gravidity
-                + Q('Gestation Weeks')
-                + Q('Visit Count')
-                + Q('Weight (kg)')
-                + Q('Systolic BP')
-                + Q('Diastolic BP')
-                + Year_2026
-            """
+           formula = """
+    Age ~ Gravidity
+    + Q('Gestation Weeks')
+    + Q('Visit Count')
+    + Q('Weight (kg)')
+    + Q('Systolic BP')
+    + Q('Diastolic BP')
+    + Year_2026
+"""
 
 
             try:
