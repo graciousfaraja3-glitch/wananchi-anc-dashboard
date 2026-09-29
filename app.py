@@ -60,6 +60,60 @@ def load_model():
 
 df = load_data()
 age_model = load_model()
+def calculate_monitoring(row):
+    score = 0
+    flags = []
+
+    age = row.get("Age")
+    parity = row.get("Parity_clean")
+    gestation = row.get("Gestation Weeks")
+    visits = row.get("Visit Count")
+    systolic = row.get("Systolic BP")
+    diastolic = row.get("Diastolic BP")
+
+    if pd.notna(age):
+        if age < 20:
+            score += 1
+            flags.append("Age below 20")
+        elif age >= 35:
+            score += 1
+            flags.append("Age 35 or above")
+
+    if pd.notna(systolic) and systolic >= 140:
+        score += 2
+        flags.append("Elevated systolic BP")
+
+    if pd.notna(diastolic) and diastolic >= 90:
+        score += 2
+        flags.append("Elevated diastolic BP")
+
+    if pd.notna(parity) and parity >= 4:
+        score += 1
+        flags.append("High parity")
+
+    if pd.notna(visits) and visits <= 1:
+        score += 1
+        flags.append("Low recorded ANC visits")
+
+    if pd.notna(gestation) and gestation > 42:
+        flags.append("Implausible gestational age")
+
+    if score >= 4:
+        category = "High monitoring concern"
+    elif score >= 2:
+        category = "Moderate monitoring concern"
+    else:
+        category = "Lower monitoring concern"
+
+    return pd.Series({
+        "Monitoring_Score": score,
+        "Monitoring_Category": category,
+        "Monitoring_Flags": "; ".join(flags)
+    })
+
+
+monitoring_results = df.apply(calculate_monitoring, axis=1)
+df = pd.concat([df, monitoring_results], axis=1)
 
 
 # ============================================================
