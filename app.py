@@ -825,6 +825,10 @@ with tabs[3]:
 # TAB 5 — AGE REGRESSION
 # ============================================================
 
+# ============================================================
+# TAB 5 — AGE REGRESSION
+# ============================================================
+
 with tabs[4]:
 
     st.header("📈 Age Regression")
@@ -837,33 +841,35 @@ with tabs[4]:
         "maternal or neonatal outcome."
     )
 
+    st.info(
+        "Parity is not included in this deployed regression because the "
+        "current dashboard CSV does not contain either the original Parity "
+        "variable or the derived Parity_clean variable."
+    )
 
-   required = [
-    "Age",
-    "Gravidity",
-    "Gestation Weeks",
-    "Visit Count",
-    "Weight (kg)",
-    "Systolic BP",
-    "Diastolic BP",
-    "Year"
-]
+    required = [
+        "Age",
+        "Gravidity",
+        "Gestation Weeks",
+        "Visit Count",
+        "Weight (kg)",
+        "Systolic BP",
+        "Diastolic BP",
+        "Year"
+    ]
 
     missing_required = [
         c for c in required
         if c not in df.columns
     ]
 
-
     if missing_required:
 
         st.warning(
-            "The regression section cannot run because these required "
-            "variables are missing from the dashboard dataset: "
+            "The regression cannot run because these required variables "
+            "are missing from the dashboard dataset: "
             + ", ".join(missing_required)
         )
-
-      
 
     else:
 
@@ -878,14 +884,12 @@ with tabs[4]:
 
         reg_df = reg_df.dropna()
 
-
         if len(reg_df) < 30:
 
             st.warning(
                 "There are fewer than 30 complete records available "
                 "for the exploratory regression."
             )
-
 
         else:
 
@@ -895,17 +899,15 @@ with tabs[4]:
                 random_state=42
             )
 
-
-           formula = """
-    Age ~ Gravidity
-    + Q('Gestation Weeks')
-    + Q('Visit Count')
-    + Q('Weight (kg)')
-    + Q('Systolic BP')
-    + Q('Diastolic BP')
-    + Year_2026
-"""
-
+            formula = """
+                Age ~ Gravidity
+                + Q('Gestation Weeks')
+                + Q('Visit Count')
+                + Q('Weight (kg)')
+                + Q('Systolic BP')
+                + Q('Diastolic BP')
+                + Year_2026
+            """
 
             try:
 
@@ -914,13 +916,11 @@ with tabs[4]:
                     data=train_df
                 ).fit()
 
-
                 predictions = dashboard_model.predict(
                     test_df
                 )
 
                 actual = test_df["Age"]
-
 
                 mae = mean_absolute_error(
                     actual,
@@ -934,11 +934,10 @@ with tabs[4]:
                     )
                 )
 
-                r2 = r2_score(
+                r2_score_value = r2_score(
                     actual,
                     predictions
                 )
-
 
                 within_2 = (
                     np.abs(
@@ -946,16 +945,13 @@ with tabs[4]:
                     ) <= 2
                 ).mean() * 100
 
-
                 within_5 = (
                     np.abs(
                         actual - predictions
                     ) <= 5
                 ).mean() * 100
 
-
                 r1, r2c, r3, r4 = st.columns(4)
-
 
                 r1.metric(
                     "MAE",
@@ -969,7 +965,7 @@ with tabs[4]:
 
                 r3.metric(
                     "R²",
-                    f"{r2:.3f}"
+                    f"{r2_score_value:.3f}"
                 )
 
                 r4.metric(
@@ -977,23 +973,19 @@ with tabs[4]:
                     f"{within_5:.1f}%"
                 )
 
-
                 st.caption(
                     f"Test-set results from {len(test_df):,} records. "
                     f"Predictions within ±2 years: {within_2:.1f}%."
                 )
 
-
                 st.subheader(
                     "Actual vs Predicted Age"
                 )
-
 
                 prediction_df = pd.DataFrame({
                     "Actual Age": actual,
                     "Predicted Age": predictions
                 })
-
 
                 fig = px.scatter(
                     prediction_df,
@@ -1001,7 +993,6 @@ with tabs[4]:
                     y="Predicted Age",
                     title="Actual vs Predicted Age"
                 )
-
 
                 min_age = min(
                     prediction_df["Actual Age"].min(),
@@ -1013,7 +1004,6 @@ with tabs[4]:
                     prediction_df["Predicted Age"].max()
                 )
 
-
                 fig.add_shape(
                     type="line",
                     x0=min_age,
@@ -1022,23 +1012,19 @@ with tabs[4]:
                     y1=max_age
                 )
 
-
                 st.plotly_chart(
                     fig,
                     use_container_width=True
                 )
 
-
                 st.subheader(
                     "Residuals"
                 )
-
 
                 residual_df = pd.DataFrame({
                     "Predicted Age": predictions,
                     "Residual": actual - predictions
                 })
-
 
                 fig = px.scatter(
                     residual_df,
@@ -1054,30 +1040,24 @@ with tabs[4]:
                     use_container_width=True
                 )
 
-
                 st.subheader(
                     "Regression Coefficients"
                 )
 
-
                 coefficients = pd.DataFrame({
                     "Variable":
                         dashboard_model.params.index,
-
                     "Coefficient":
                         dashboard_model.params.values,
-
                     "P-value":
                         dashboard_model.pvalues.values
                 })
-
 
                 st.dataframe(
                     coefficients,
                     use_container_width=True,
                     hide_index=True
                 )
-
 
                 with st.expander(
                     "Model summary"
@@ -1087,17 +1067,14 @@ with tabs[4]:
                         dashboard_model.summary()
                     )
 
-
                 st.warning(
-                    "Interpretation: the regression is exploratory. "
-                    "The R² value indicates the proportion of variation "
-                    "in recorded age explained by the included variables "
-                    "in this sample; it does not establish clinical risk "
-                    "or causation. A validated adverse maternal or neonatal "
-                    "outcome was not available for reliable linkage in "
-                    "the ANC register."
+                    "Interpretation: this regression is exploratory. "
+                    "The model describes statistical associations with "
+                    "recorded maternal age; it does not establish clinical "
+                    "risk, causation, or prediction of adverse maternal or "
+                    "neonatal outcomes. A validated adverse outcome was not "
+                    "available for reliable linkage in the ANC register."
                 )
-
 
             except Exception as e:
 
