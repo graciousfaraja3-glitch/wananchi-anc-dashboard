@@ -1,23 +1,29 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import joblib
-import statsmodels.api as sm
 import statsmodels.formula.api as smf
-
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
-
-# ============================================================
-# PAGE SETUP
-# ============================================================
 
 st.set_page_config(
     page_title="Wananchi ANC Monitoring",
     page_icon="🏥",
     layout="wide"
+)
+
+st.title("🏥 Wananchi Hospital ANC Monitoring Dashboard")
+
+st.markdown(
+    "This dashboard provides an exploratory summary of routinely recorded "
+    "antenatal care (ANC) data from Wananchi Hospital for January–August "
+    "2021 and January–August 2026."
+)
+
+st.info(
+    "⚠️ The ANC monitoring framework is exploratory and is not a validated "
+    "clinical diagnostic or adverse-outcome prediction tool."
 )
 
 
@@ -47,49 +53,80 @@ def load_data():
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # Reconstruct Parity_clean if only the original Parity column exists
+    if "Parity_clean" not in df.columns and "Parity" in df.columns:
+        parity_original = df["Parity"].astype(str).str.strip()
+
+        df["Parity_clean"] = pd.to_numeric(
+            parity_original.str.extract(
+                r"^(\d+)",
+                expand=False
+            ),
+            errors="coerce"
+        )
+
+    # Reconstruct Parity_Group if needed
+    if "Parity_Group" not in df.columns and "Parity_clean" in df.columns:
+
+        def create_parity_group(x):
+            if pd.isna(x):
+                return np.nan
+            elif x == 0:
+                return "0"
+            elif x == 1:
+                return "1"
+            elif x == 2:
+                return "2"
+            else:
+                return "3+"
+
+        df["Parity_Group"] = df["Parity_clean"].apply(
+            create_parity_group
+        )
+
+    # Reconstruct age groups if needed
+    if "Age_Group" not in df.columns and "Age" in df.columns:
+
+        bins = [0, 19, 24, 29, 34, 39, 100]
+        labels = [
+            "<20",
+            "20-24",
+            "25-29",
+            "30-34",
+            "35-39",
+            "40+"
+        ]
+
+        df["Age_Group"] = pd.cut(
+            df["Age"],
+            bins=bins,
+            labels=labels,
+            right=True
+        )
+
     return df
 
 
 @st.cache_resource
 def load_model():
     try:
-        return joblib.load("wananchi_age_regression_model.pkl")
+        return joblib.load(
+            "wananchi_age_regression_model.pkl"
+        )
     except Exception:
         return None
 
 
 df = load_data()
-# Recreate cleaned parity variables for the deployed dataset
-if "Parity" in df.columns:
-    df["Parity_original"] = df["Parity"].astype(str).str.strip()
-
-    df["Parity_clean"] = (
-        df["Parity_original"]
-        .str.extract(r"^(\d+)", expand=False)
-    )
-
-    df["Parity_clean"] = pd.to_numeric(
-        df["Parity_clean"],
-        errors="coerce"
-    )
-
-    def create_parity_group(x):
-        if pd.isna(x):
-            return pd.NA
-        if x == 0:
-            return "0"
-        elif x == 1:
-            return "1"
-        elif x == 2:
-            return "2"
-        else:
-            return "3+"
-
-    df["Parity_Group"] = df["Parity_clean"].apply(
-        create_parity_group
-    )
 age_model = load_model()
+
+
+# ============================================================
+# MONITORING FRAMEWORK
+# ============================================================
+
 def calculate_monitoring(row):
+
     score = 0
     flags = []
 
@@ -101,9 +138,11 @@ def calculate_monitoring(row):
     diastolic = row.get("Diastolic BP")
 
     if pd.notna(age):
+
         if age < 20:
             score += 1
             flags.append("Age below 20")
+
         elif age >= 35:
             score += 1
             flags.append("Age 35 or above")
@@ -124,13 +163,20 @@ def calculate_monitoring(row):
         score += 1
         flags.append("Low recorded ANC visits")
 
-    if pd.notna(gestation) and gestation > 42:
-        flags.append("Implausible gestational age")
+    if pd.notna(gestation):
+
+        if gestation > 42:
+            flags.append("Implausible gestational age")
+
+        elif gestation < 0:
+            flags.append("Invalid gestational age")
 
     if score >= 4:
         category = "High monitoring concern"
+
     elif score >= 2:
         category = "Moderate monitoring concern"
+
     else:
         category = "Lower monitoring concern"
 
@@ -141,90 +187,119 @@ def calculate_monitoring(row):
     })
 
 
-monitoring_results = df.apply(calculate_monitoring, axis=1)
-df = pd.concat([df, monitoring_results], axis=1)
-
-
-# ============================================================
-# TITLE
-# ============================================================
-
-st.title("🏥 Wananchi Hospital ANC Monitoring Dashboard")
-
-st.markdown(
-    """
-    This dashboard provides an exploratory summary of routinely recorded
-    antenatal care (ANC) data from Wananchi Hospital for January–August
-    2021 and January–August 2026.
-    """
+monitoring_results = df.apply(
+    calculate_monitoring,
+    axis=1
 )
 
-st.info(
-    "⚠️ The ANC monitoring framework is exploratory and is not a validated "
-    "clinical diagnostic or adverse-outcome prediction tool."
+df = pd.concat(
+    [df, monitoring_results],
+    axis=1
 )
+
+filtered_df = df.copy()
 
 
 # ============================================================
-# SIDEBAR FILTER
+# SIDEBAR FILTERS
 # ============================================================
 
 st.sidebar.header("Dashboard Filters")
 
-years = sorted(df["Year"].dropna().unique())
+if "Year" in df.columns:
 
-selected_years = st.sidebar.multiselect(
-    "Select year",
-    years,
-    default=years
-)
+    years = sorted(
+        df["Year"].dropna().unique().tolist()
+    )
 
-filtered_df = df[df["Year"].isin(selected_years)].copy()
+    selected_years = st.sidebar.multiselect(
+        "Select year",
+        years,
+        default=years
+    )
+
+    filtered_df = df[
+        df["Year"].isin(selected_years)
+    ].copy()
+
+else:
+
+    selected_years = []
+
+    st.sidebar.warning(
+        "Year column not found."
+    )
 
 
 # ============================================================
 # KPI CARDS
 # ============================================================
 
-col1, col2, col3, col4 = st.columns(4)
+total_records = len(filtered_df)
 
-with col1:
-    st.metric(
-        "ANC Records",
-        len(filtered_df)
-    )
-
-with col2:
+if (
+    "Age" in filtered_df.columns
+    and filtered_df["Age"].notna().any()
+):
     mean_age = filtered_df["Age"].mean()
-    st.metric(
-        "Mean Age",
-        f"{mean_age:.1f} years" if not pd.isna(mean_age) else "N/A"
-    )
+else:
+    mean_age = np.nan
 
-with col3:
+
+if (
+    "Visit Count" in filtered_df.columns
+    and filtered_df["Visit Count"].notna().any()
+):
     mean_visits = filtered_df["Visit Count"].mean()
-    st.metric(
-        "Mean ANC Visits",
-        f"{mean_visits:.1f}" if not pd.isna(mean_visits) else "N/A"
+else:
+    mean_visits = np.nan
+
+
+elevated_bp = 0
+
+if "Systolic BP" in filtered_df.columns:
+    elevated_bp += int(
+        (filtered_df["Systolic BP"] >= 140).sum()
     )
 
-with col4:
-    high_bp = (
-        (filtered_df["Systolic BP"] >= 140) |
-        (filtered_df["Diastolic BP"] >= 90)
-    ).sum()
-
-    st.metric(
-        "Elevated BP Records",
-        int(high_bp)
+if "Diastolic BP" in filtered_df.columns:
+    elevated_bp += int(
+        (filtered_df["Diastolic BP"] >= 90).sum()
     )
+
+
+k1, k2, k3, k4 = st.columns(4)
+
+k1.metric(
+    "ANC Records",
+    f"{total_records:,}"
+)
+
+k2.metric(
+    "Mean Age",
+    f"{mean_age:.1f} years"
+    if pd.notna(mean_age)
+    else "N/A"
+)
+
+k3.metric(
+    "Mean ANC Visits",
+    f"{mean_visits:.1f}"
+    if pd.notna(mean_visits)
+    else "N/A"
+)
+
+k4.metric(
+    "Elevated BP Records",
+    f"{elevated_bp:,}"
+)
 
 
 # ============================================================
 # TABS
 # ============================================================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tabs = st.tabs([
     "📊 ANC Dashboard",
     "🚩 ANC Monitoring",
     "📋 Data",
@@ -237,356 +312,346 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1 — ANC DASHBOARD
 # ============================================================
 
-with tab1:
+with tabs[0]:
 
     st.header("ANC Dashboard")
 
-    # --------------------------------------------------------
-    # AGE
-    # --------------------------------------------------------
+    if filtered_df.empty:
 
-    st.subheader("Age Distribution")
-
-    fig_age = px.histogram(
-        filtered_df,
-        x="Age",
-        color="Year",
-        nbins=20,
-        barmode="overlay",
-        title="Age Distribution by Year"
-    )
-
-    st.plotly_chart(
-        fig_age,
-        use_container_width=True
-    )
-
-
-    # --------------------------------------------------------
-    # GESTATIONAL AGE
-    # --------------------------------------------------------
-
-    st.subheader("Gestational Age")
-
-    fig_gestation = px.histogram(
-        filtered_df,
-        x="Gestation Weeks",
-        color="Year",
-        nbins=20,
-        barmode="overlay",
-        title="Gestational Age Distribution"
-    )
-
-    st.plotly_chart(
-        fig_gestation,
-        use_container_width=True
-    )
-
-
-    # --------------------------------------------------------
-    # VISITS AND WEIGHT
-    # --------------------------------------------------------
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.subheader("ANC Visit Count")
-
-        visit_counts = (
-            filtered_df
-            .groupby(["Year", "Visit Count"])
-            .size()
-            .reset_index(name="Records")
+        st.warning(
+            "No records match the selected filters."
         )
 
-        fig_visits = px.bar(
-            visit_counts,
-            x="Visit Count",
-            y="Records",
-            color="Year",
-            barmode="group",
-            title="ANC Visits by Year"
-        )
+    else:
 
-        st.plotly_chart(
-            fig_visits,
-            use_container_width=True
-        )
+        c1, c2 = st.columns(2)
+
+        with c1:
+
+            if "Age" in filtered_df.columns:
+
+                fig = px.histogram(
+                    filtered_df,
+                    x="Age",
+                    nbins=20,
+                    title="Age Distribution"
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+
+        with c2:
+
+            if "Gestation Weeks" in filtered_df.columns:
+
+                fig = px.histogram(
+                    filtered_df,
+                    x="Gestation Weeks",
+                    nbins=20,
+                    title="Gestational Age Distribution"
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
 
 
-    with col2:
+        c3, c4 = st.columns(2)
 
-        st.subheader("Weight Distribution")
+        with c3:
 
-        fig_weight = px.box(
-            filtered_df,
-            x="Year",
-            y="Weight (kg)",
-            points="outliers",
-            title="Weight Distribution by Year"
-        )
+            if "Visit Count" in filtered_df.columns:
 
-        st.plotly_chart(
-            fig_weight,
-            use_container_width=True
-        )
+                visit_counts = (
+                    filtered_df["Visit Count"]
+                    .value_counts(dropna=False)
+                    .sort_index()
+                    .reset_index()
+                )
+
+                visit_counts.columns = [
+                    "Visit Count",
+                    "Records"
+                ]
+
+                fig = px.bar(
+                    visit_counts,
+                    x="Visit Count",
+                    y="Records",
+                    title="Recorded ANC Visits"
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+
+        with c4:
+
+            if "Weight (kg)" in filtered_df.columns:
+
+                fig = px.box(
+                    filtered_df,
+                    x=(
+                        "Year"
+                        if "Year" in filtered_df.columns
+                        else None
+                    ),
+                    y="Weight (kg)",
+                    title="Maternal Weight by Year"
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
 
 
-    # --------------------------------------------------------
-    # BLOOD PRESSURE
-    # --------------------------------------------------------
+        c5, c6 = st.columns(2)
 
-    st.subheader("Blood Pressure")
+        with c5:
 
-    bp_df = filtered_df[
-        ["Year", "Systolic BP", "Diastolic BP"]
-    ].melt(
-        id_vars="Year",
-        var_name="Blood Pressure",
-        value_name="Value"
-    )
+            if "Systolic BP" in filtered_df.columns:
 
-    fig_bp = px.box(
-        bp_df,
-        x="Year",
-        y="Value",
-        color="Blood Pressure",
-        title="Blood Pressure Distribution by Year"
-    )
+                fig = px.box(
+                    filtered_df,
+                    x=(
+                        "Year"
+                        if "Year" in filtered_df.columns
+                        else None
+                    ),
+                    y="Systolic BP",
+                    title="Systolic Blood Pressure by Year"
+                )
 
-    st.plotly_chart(
-        fig_bp,
-        use_container_width=True
-    )
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+
+        with c6:
+
+            if "Diastolic BP" in filtered_df.columns:
+
+                fig = px.box(
+                    filtered_df,
+                    x=(
+                        "Year"
+                        if "Year" in filtered_df.columns
+                        else None
+                    ),
+                    y="Diastolic BP",
+                    title="Diastolic Blood Pressure by Year"
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
 
 
 # ============================================================
 # TAB 2 — ANC MONITORING
 # ============================================================
 
-with tab2:
+with tabs[1]:
 
-    st.header("🚩 Exploratory ANC Monitoring Framework")
+    st.header("🚩 ANC Monitoring Framework")
 
     st.markdown(
-        """
-        The framework assigns monitoring points to selected characteristics
-        recorded in the ANC register. It is intended for exploratory
-        monitoring only and does not replace clinical assessment.
-        """
+        "This section applies a simple, transparent set of monitoring "
+        "flags to routinely recorded ANC characteristics. The thresholds "
+        "and weights are illustrative and have not been clinically validated."
     )
 
-    # --------------------------------------------------------
-    # CATEGORY DISTRIBUTION
-    # --------------------------------------------------------
+    if filtered_df.empty:
 
-    category_counts = (
-        filtered_df["Monitoring_Category"]
-        .value_counts()
-        .reset_index()
-    )
+        st.warning(
+            "No records match the selected filters."
+        )
 
-    category_counts.columns = [
-        "Monitoring Category",
-        "Records"
-    ]
+    else:
 
-    fig_monitoring = px.bar(
-        category_counts,
-        x="Monitoring Category",
-        y="Records",
-        title="Monitoring Categories"
-    )
+        category_counts = (
+            filtered_df["Monitoring_Category"]
+            .value_counts()
+            .reset_index()
+        )
 
-    st.plotly_chart(
-        fig_monitoring,
-        use_container_width=True
-    )
-
-
-    # --------------------------------------------------------
-    # MONITORING BY YEAR
-    # --------------------------------------------------------
-
-    st.subheader("Monitoring Summary by Year")
-
-    monitoring_summary = (
-        filtered_df[
-            ["Year", "Monitoring_Category"]
+        category_counts.columns = [
+            "Category",
+            "Records"
         ]
-        .groupby(
-            ["Year", "Monitoring_Category"]
-        )
-        .size()
-        .reset_index(name="Records")
-    )
 
-    st.dataframe(
-        monitoring_summary,
-        use_container_width=True
-    )
-
-
-    # --------------------------------------------------------
-    # INDIVIDUAL CALCULATOR
-    # --------------------------------------------------------
-
-    st.subheader("Individual Monitoring Calculator")
-
-    st.write(
-        "Enter example ANC characteristics to demonstrate how the "
-        "exploratory monitoring framework operates."
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        age = st.number_input(
-            "Age",
-            min_value=10,
-            max_value=60,
-            value=25
+        fig = px.bar(
+            category_counts,
+            x="Category",
+            y="Records",
+            title="Monitoring Concern Categories"
         )
 
-        parity = st.number_input(
-            "Parity",
-            min_value=0,
-            max_value=15,
-            value=1
+        st.plotly_chart(
+            fig,
+            use_container_width=True
         )
 
-        gestation = st.number_input(
-            "Gestation Weeks",
-            min_value=0,
-            max_value=60,
-            value=24
-        )
 
-        visits = st.number_input(
-            "ANC Visit Count",
-            min_value=0,
-            max_value=50,
-            value=2
-        )
+        if "Year" in filtered_df.columns:
 
-    with col2:
-
-        weight = st.number_input(
-            "Weight (kg)",
-            min_value=20.0,
-            max_value=250.0,
-            value=65.0
-        )
-
-        systolic = st.number_input(
-            "Systolic BP",
-            min_value=50,
-            max_value=250,
-            value=120
-        )
-
-        diastolic = st.number_input(
-            "Diastolic BP",
-            min_value=30,
-            max_value=150,
-            value=80
-        )
-
-    if st.button("Assess Monitoring Level"):
-
-        score = 0
-        flags = []
-
-        if age < 20:
-            score += 1
-            flags.append("Age below 20")
-
-        elif age >= 35:
-            score += 1
-            flags.append("Age 35 or above")
-
-        if systolic >= 140:
-            score += 2
-            flags.append("Elevated systolic BP")
-
-        if diastolic >= 90:
-            score += 2
-            flags.append("Elevated diastolic BP")
-
-        if parity >= 4:
-            score += 1
-            flags.append("High parity")
-
-        if visits <= 1:
-            score += 1
-            flags.append("Low recorded ANC visits")
-
-        if gestation > 42:
-            flags.append("Implausible gestational age")
-
-        if score >= 4:
-
-            category = "High monitoring concern"
-
-        elif score >= 2:
-
-            category = "Moderate monitoring concern"
-
-        else:
-
-            category = "Lower monitoring concern"
-
-        st.metric(
-            "Monitoring Score",
-            score
-        )
-
-        st.write(
-            "**Monitoring Category:**",
-            category
-        )
-
-        if flags:
-
-            st.write("**Monitoring Flags:**")
-
-            for flag in flags:
-                st.warning(flag)
-
-        else:
-
-            st.success(
-                "No monitoring flags were triggered by this framework."
+            year_summary = (
+                filtered_df
+                .groupby(
+                    [
+                        "Year",
+                        "Monitoring_Category"
+                    ]
+                )
+                .size()
+                .reset_index(
+                    name="Records"
+                )
             )
 
-    st.caption(
-        "Note: Weight is displayed as contextual ANC information but is "
-        "not currently assigned points in this exploratory scoring rule."
-    )
+            st.subheader(
+                "Monitoring Categories by Year"
+            )
+
+            st.dataframe(
+                year_summary,
+                use_container_width=True,
+                hide_index=True
+            )
+
+
+        st.subheader(
+            "Individual Monitoring Calculator"
+        )
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+
+            calc_age = st.number_input(
+                "Age",
+                min_value=10,
+                max_value=60,
+                value=28
+            )
+
+            calc_parity = st.number_input(
+                "Parity",
+                min_value=0,
+                max_value=15,
+                value=1
+            )
+
+            calc_gestation = st.number_input(
+                "Gestation weeks",
+                min_value=0,
+                max_value=60,
+                value=24
+            )
+
+        with c2:
+
+            calc_visits = st.number_input(
+                "Recorded ANC visits",
+                min_value=0,
+                max_value=50,
+                value=2
+            )
+
+            calc_weight = st.number_input(
+                "Weight (kg)",
+                min_value=20.0,
+                max_value=250.0,
+                value=65.0
+            )
+
+        with c3:
+
+            calc_sbp = st.number_input(
+                "Systolic BP",
+                min_value=50,
+                max_value=250,
+                value=120
+            )
+
+            calc_dbp = st.number_input(
+                "Diastolic BP",
+                min_value=30,
+                max_value=180,
+                value=80
+            )
+
+
+        if st.button(
+            "Calculate monitoring flags"
+        ):
+
+            test_row = pd.Series({
+                "Age": calc_age,
+                "Parity_clean": calc_parity,
+                "Gestation Weeks": calc_gestation,
+                "Visit Count": calc_visits,
+                "Weight (kg)": calc_weight,
+                "Systolic BP": calc_sbp,
+                "Diastolic BP": calc_dbp
+            })
+
+            result = calculate_monitoring(
+                test_row
+            )
+
+            st.metric(
+                "Monitoring score",
+                int(result["Monitoring_Score"])
+            )
+
+            st.write(
+                "**Category:**",
+                result["Monitoring_Category"]
+            )
+
+            if result["Monitoring_Flags"]:
+
+                st.write(
+                    "**Flags:**",
+                    result["Monitoring_Flags"]
+                )
+
+            else:
+
+                st.write(
+                    "No monitoring flags identified."
+                )
 
 
 # ============================================================
 # TAB 3 — DATA
 # ============================================================
 
-with tab3:
+with tabs[2]:
 
-    st.header("📋 Cleaned ANC Data")
+    st.header("📋 Data")
+
+    st.caption(
+        "The table below shows the records available in the dashboard "
+        "dataset after the selected year filters."
+    )
+
+    st.write(
+        f"Showing **{len(filtered_df):,}** records and "
+        f"**{len(filtered_df.columns):,}** columns."
+    )
 
     st.dataframe(
         filtered_df,
-        use_container_width=True
-    )
-
-    st.success(
-        "✅ Dashboard data loaded successfully."
-    )
-
-    st.caption(
-        "The displayed dataset excludes Serial Number, HIV Status, "
-        "TB Screening, Infant Prophylaxis and MUAC from the analytical dataset."
+        use_container_width=True,
+        hide_index=True
     )
 
 
@@ -594,199 +659,165 @@ with tab3:
 # TAB 4 — DATA QUALITY
 # ============================================================
 
-with tab4:
+with tabs[3]:
 
-    st.header("🔎 Data Quality Assessment")
+    st.header("🔎 Data Quality")
 
     st.markdown(
-        """
-        This section describes completeness, duplication and selected
-        validity checks in the analytical dataset. Flags are intended for
-        data-quality investigation and do not automatically imply that
-        individual records are incorrect.
-        """
+        "Data-quality checks help identify missing, duplicate, or "
+        "potentially implausible values before interpreting trends."
     )
 
 
-    # --------------------------------------------------------
-    # BASIC DATA QUALITY KPIs
-    # --------------------------------------------------------
+    dq1, dq2, dq3 = st.columns(3)
 
-    total_records = len(filtered_df)
-
-    duplicate_records = filtered_df.duplicated().sum()
-
-    total_missing = filtered_df.isna().sum().sum()
-
-    total_cells = filtered_df.shape[0] * filtered_df.shape[1]
-
-    completeness = (
-        100 * (1 - total_missing / total_cells)
-        if total_cells > 0
-        else 0
+    missing_cells = int(
+        filtered_df.isna().sum().sum()
     )
 
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric(
-            "Records",
-            total_records
-        )
-
-    with col2:
-        st.metric(
-            "Duplicate Rows",
-            int(duplicate_records)
-        )
-
-    with col3:
-        st.metric(
-            "Missing Cells",
-            int(total_missing)
-        )
-
-    with col4:
-        st.metric(
-            "Overall Completeness",
-            f"{completeness:.1f}%"
-        )
-
-
-    # --------------------------------------------------------
-    # MISSINGNESS
-    # --------------------------------------------------------
-
-    st.subheader("Missing Values by Variable")
-
-    missing_table = pd.DataFrame({
-        "Variable": filtered_df.columns,
-        "Missing Values": filtered_df.isna().sum().values
-    })
-
-    missing_table["Missing (%)"] = (
-        missing_table["Missing Values"] /
-        len(filtered_df) * 100
-        if len(filtered_df) > 0
-        else 0
+    duplicate_rows = int(
+        filtered_df.duplicated().sum()
     )
 
-    missing_table = missing_table.sort_values(
-        "Missing (%)",
-        ascending=False
+    dq1.metric(
+        "Missing cells",
+        f"{missing_cells:,}"
     )
 
-    fig_missing = px.bar(
-        missing_table,
-        x="Variable",
-        y="Missing (%)",
-        title="Percentage of Missing Values"
+    dq2.metric(
+        "Duplicate rows",
+        f"{duplicate_rows:,}"
     )
 
-    fig_missing.update_layout(
-        xaxis_tickangle=-45
+    dq3.metric(
+        "Columns",
+        f"{len(filtered_df.columns):,}"
     )
 
-    st.plotly_chart(
-        fig_missing,
-        use_container_width=True
+
+    st.subheader(
+        "Missingness by Variable"
     )
+
+    missing_table = (
+        filtered_df.isna()
+        .sum()
+        .reset_index()
+    )
+
+    missing_table.columns = [
+        "Variable",
+        "Missing"
+    ]
+
+    missing_table["Percent Missing"] = (
+        missing_table["Missing"]
+        / max(len(filtered_df), 1)
+        * 100
+    ).round(1)
 
     st.dataframe(
-        missing_table,
-        use_container_width=True
+        missing_table.sort_values(
+            "Percent Missing",
+            ascending=False
+        ),
+        use_container_width=True,
+        hide_index=True
     )
 
 
-    # --------------------------------------------------------
-    # DUPLICATES
-    # --------------------------------------------------------
+    st.subheader(
+        "Potential Validity Checks"
+    )
 
-    st.subheader("Duplicate Records")
+    validity_rows = []
 
-    if duplicate_records > 0:
-
-        st.warning(
-            f"{duplicate_records} duplicate row(s) detected."
-        )
-
-    else:
-
-        st.success(
-            "No exact duplicate rows detected in the selected data."
-        )
-
-
-    # --------------------------------------------------------
-    # IMPLAUSIBLE VALUES
-    # --------------------------------------------------------
-
-    st.subheader("Selected Validity Checks")
-
-    quality_checks = []
-
-    if "Age" in filtered_df.columns:
-
-        quality_checks.append({
-            "Check": "Age below 15 or above 49",
-            "Records Flagged": int(
-                ((filtered_df["Age"] < 15) |
-                 (filtered_df["Age"] > 49)).sum()
-            )
-        })
 
     if "Gestation Weeks" in filtered_df.columns:
 
-        quality_checks.append({
-            "Check": "Gestation above 42 weeks",
-            "Records Flagged": int(
-                (filtered_df["Gestation Weeks"] > 42).sum()
-            )
+        invalid_gestation = int(
+            (
+                (filtered_df["Gestation Weeks"] < 0)
+                |
+                (filtered_df["Gestation Weeks"] > 42)
+            ).sum()
+        )
+
+        validity_rows.append({
+            "Variable": "Gestation Weeks",
+            "Potentially implausible records":
+                invalid_gestation,
+            "Rule": "<0 or >42 weeks"
         })
 
-    if "Weight (kg)" in filtered_df.columns:
-
-        quality_checks.append({
-            "Check": "Weight below 30 kg or above 150 kg",
-            "Records Flagged": int(
-                ((filtered_df["Weight (kg)"] < 30) |
-                 (filtered_df["Weight (kg)"] > 150)).sum()
-            )
-        })
 
     if "Systolic BP" in filtered_df.columns:
 
-        quality_checks.append({
-            "Check": "Systolic BP below 70 or above 200",
-            "Records Flagged": int(
-                ((filtered_df["Systolic BP"] < 70) |
-                 (filtered_df["Systolic BP"] > 200)).sum()
-            )
+        invalid_sbp = int(
+            (
+                (filtered_df["Systolic BP"] < 50)
+                |
+                (filtered_df["Systolic BP"] > 250)
+            ).sum()
+        )
+
+        validity_rows.append({
+            "Variable": "Systolic BP",
+            "Potentially implausible records":
+                invalid_sbp,
+            "Rule": "<50 or >250 mmHg"
         })
+
 
     if "Diastolic BP" in filtered_df.columns:
 
-        quality_checks.append({
-            "Check": "Diastolic BP below 40 or above 120",
-            "Records Flagged": int(
-                ((filtered_df["Diastolic BP"] < 40) |
-                 (filtered_df["Diastolic BP"] > 120)).sum()
-            )
+        invalid_dbp = int(
+            (
+                (filtered_df["Diastolic BP"] < 30)
+                |
+                (filtered_df["Diastolic BP"] > 180)
+            ).sum()
+        )
+
+        validity_rows.append({
+            "Variable": "Diastolic BP",
+            "Potentially implausible records":
+                invalid_dbp,
+            "Rule": "<30 or >180 mmHg"
         })
 
-    quality_df = pd.DataFrame(
-        quality_checks
-    )
 
-    st.dataframe(
-        quality_df,
-        use_container_width=True
-    )
+    if "Age" in filtered_df.columns:
 
-    st.info(
-        "Validity thresholds shown here are screening thresholds for "
-        "data-quality review. They should not be interpreted as clinical "
-        "diagnostic thresholds."
+        invalid_age = int(
+            (
+                (filtered_df["Age"] < 10)
+                |
+                (filtered_df["Age"] > 60)
+            ).sum()
+        )
+
+        validity_rows.append({
+            "Variable": "Age",
+            "Potentially implausible records":
+                invalid_age,
+            "Rule": "<10 or >60 years"
+        })
+
+
+    if validity_rows:
+
+        st.dataframe(
+            pd.DataFrame(validity_rows),
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+    st.warning(
+        "Potentially implausible values are flagged for review; they are "
+        "not automatically deleted because unusual values may reflect "
+        "legitimate clinical records or data-entry issues."
     )
 
 
@@ -794,375 +825,294 @@ with tab4:
 # TAB 5 — AGE REGRESSION
 # ============================================================
 
-with tab5:
+with tabs[4]:
 
-    st.header("📈 Exploratory Multiple Linear Regression")
+    st.header("📈 Age Regression")
 
     st.markdown(
-        """
-        This analysis models recorded maternal age using selected ANC
-        characteristics. It is an exploratory statistical analysis and
-        should not be interpreted as a clinical risk-prediction model.
-        """
+        "This exploratory regression examines how selected routinely "
+        "recorded ANC characteristics relate statistically to recorded "
+        "maternal age. Age is used here as the dependent variable because "
+        "the ANC register does not contain a reliably linked adverse "
+        "maternal or neonatal outcome."
     )
 
 
-    # --------------------------------------------------------
-    # CHECK MODEL
-    # --------------------------------------------------------
+    required = [
+        "Age",
+        "Parity_clean",
+        "Gravidity",
+        "Gestation Weeks",
+        "Visit Count",
+        "Weight (kg)",
+        "Systolic BP",
+        "Diastolic BP",
+        "Year"
+    ]
 
-    if age_model is None:
+    missing_required = [
+        c for c in required
+        if c not in df.columns
+    ]
 
-        st.error(
-            "The regression model file was not found. "
-            "Make sure 'wananchi_age_regression_model.pkl' "
-            "is in the same folder as app.py."
+
+    if missing_required:
+
+        st.warning(
+            "The regression section cannot run because these required "
+            "variables are missing from the dashboard dataset: "
+            + ", ".join(missing_required)
         )
+
+        if (
+            "Parity_clean" not in df.columns
+            and "Parity" not in df.columns
+        ):
+
+            st.info(
+                "The current CSV does not contain either 'Parity_clean' "
+                "or 'Parity'. The other dashboard tabs can still work."
+            )
+
 
     else:
 
-        # ----------------------------------------------------
-        # CREATE REGRESSION DATA
-        # ----------------------------------------------------
+        reg_df = df[required].copy()
 
-        regression_variables = [
-    "Age",
-    "Parity_clean",
-    "Gravidity",
-    "Gestation Weeks",
-    "Visit Count",
-    "Weight (kg)",
-    "Systolic BP",
-    "Diastolic BP",
-    "Year"
-]
+        reg_df["Year_2026"] = (
+            pd.to_numeric(
+                reg_df["Year"],
+                errors="coerce"
+            ) == 2026
+        ).astype(int)
 
-reg_df = df[regression_variables].copy()
+        reg_df = reg_df.dropna()
 
-# Ensure numeric variables are actually numeric
-for col in regression_variables:
-    reg_df[col] = pd.to_numeric(reg_df[col], errors="coerce")
 
-# Create the 2026 indicator
-reg_df["Year_2026"] = (reg_df["Year"] == 2026).astype(int)
+        if len(reg_df) < 30:
 
-# Keep complete cases for the regression
-reg_df = reg_df.dropna()
-        # ----------------------------------------------------
-        # DISPLAY MODEL METRICS
-        # ----------------------------------------------------
+            st.warning(
+                "There are fewer than 30 complete records available "
+                "for the exploratory regression."
+            )
 
-        # Use stored model if available
-        try:
 
-            formula_test = """
-formula = """
-Age ~ Parity_clean
-     + Gravidity
-     + Q('Gestation Weeks')
-     + Q('Visit Count')
-     + Q('Weight (kg)')
-     + Q('Systolic BP')
-     + Q('Diastolic BP')
-     + Year_2026
-"""
+        else:
+
+            train_df, test_df = train_test_split(
+                reg_df,
+                test_size=0.20,
+                random_state=42
+            )
+
+
+            formula = """
+                Age ~ Parity_clean
+                + Gravidity
+                + Q('Gestation Weeks')
+                + Q('Visit Count')
+                + Q('Weight (kg)')
+                + Q('Systolic BP')
+                + Q('Diastolic BP')
+                + Year_2026
             """
 
-            # Refit only to obtain consistent dashboard evaluation
-            # on the complete available analytical dataset.
-            dashboard_model = smf.ols(
-                formula_test,
-                data=regression_df
-            ).fit()
 
-            predictions = dashboard_model.predict(
-                regression_df
-            )
+            try:
 
-            actual = regression_df["Age"]
+                dashboard_model = smf.ols(
+                    formula,
+                    data=train_df
+                ).fit()
 
-            mae = mean_absolute_error(
-                actual,
-                predictions
-            )
 
-            rmse = np.sqrt(
-                mean_squared_error(
+                predictions = dashboard_model.predict(
+                    test_df
+                )
+
+                actual = test_df["Age"]
+
+
+                mae = mean_absolute_error(
                     actual,
                     predictions
                 )
-            )
 
-            r2 = r2_score(
-                actual,
-                predictions
-            )
-
-            within_2 = (
-                np.abs(actual - predictions) <= 2
-            ).mean() * 100
-
-            within_3 = (
-                np.abs(actual - predictions) <= 3
-            ).mean() * 100
-
-            within_5 = (
-                np.abs(actual - predictions) <= 5
-            ).mean() * 100
-
-            within_10 = (
-                np.abs(actual - predictions) <= 10
-            ).mean() * 100
-
-            mape = (
-                np.mean(
-                    np.abs(
-                        (actual - predictions) /
-                        actual
+                rmse = np.sqrt(
+                    mean_squared_error(
+                        actual,
+                        predictions
                     )
-                ) * 100
-            )
+                )
+
+                r2 = r2_score(
+                    actual,
+                    predictions
+                )
 
 
-            # ------------------------------------------------
-            # METRIC CARDS
-            # ------------------------------------------------
+                within_2 = (
+                    np.abs(
+                        actual - predictions
+                    ) <= 2
+                ).mean() * 100
 
-            st.subheader("Regression Performance")
 
-            col1, col2, col3 = st.columns(3)
+                within_5 = (
+                    np.abs(
+                        actual - predictions
+                    ) <= 5
+                ).mean() * 100
 
-            with col1:
 
-                st.metric(
+                r1, r2c, r3, r4 = st.columns(4)
+
+
+                r1.metric(
                     "MAE",
                     f"{mae:.2f} years"
                 )
 
-            with col2:
-
-                st.metric(
+                r2c.metric(
                     "RMSE",
                     f"{rmse:.2f} years"
                 )
 
-            with col3:
-
-                st.metric(
+                r3.metric(
                     "R²",
                     f"{r2:.3f}"
                 )
 
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-
-                st.metric(
-                    "Within ±2 years",
-                    f"{within_2:.1f}%"
-                )
-
-            with col2:
-
-                st.metric(
-                    "Within ±3 years",
-                    f"{within_3:.1f}%"
-                )
-
-            with col3:
-
-                st.metric(
+                r4.metric(
                     "Within ±5 years",
                     f"{within_5:.1f}%"
                 )
 
-            with col4:
 
-                st.metric(
-                    "Within ±10 years",
-                    f"{within_10:.1f}%"
+                st.caption(
+                    f"Test-set results from {len(test_df):,} records. "
+                    f"Predictions within ±2 years: {within_2:.1f}%."
                 )
 
 
-            st.metric(
-                "MAPE",
-                f"{mape:.2f}%"
-            )
-
-
-            # ------------------------------------------------
-            # INTERPRETATION
-            # ------------------------------------------------
-
-            st.info(
-                f"""
-                **Interpretation:** The exploratory model has an R² of
-                {r2:.3f}, meaning that approximately {r2 * 100:.1f}% of
-                the variation in recorded age is explained by the included
-                predictors in this fitted dataset. The MAE is approximately
-                {mae:.2f} years.
-
-                The percentages reported above describe the proportion of
-                observations whose predicted age falls within the stated
-                error range. They should not be interpreted as clinical
-                prediction accuracy.
-                """
-            )
-
-
-            # ------------------------------------------------
-            # ACTUAL VS PREDICTED
-            # ------------------------------------------------
-
-            st.subheader("Actual vs Predicted Age")
-
-            prediction_df = pd.DataFrame({
-                "Actual Age": actual,
-                "Predicted Age": predictions
-            })
-
-            fig_prediction = px.scatter(
-                prediction_df,
-                x="Actual Age",
-                y="Predicted Age",
-                title="Actual vs Predicted Age"
-            )
-
-            min_age = min(
-                prediction_df["Actual Age"].min(),
-                prediction_df["Predicted Age"].min()
-            )
-
-            max_age = max(
-                prediction_df["Actual Age"].max(),
-                prediction_df["Predicted Age"].max()
-            )
-
-            fig_prediction.add_shape(
-                type="line",
-                x0=min_age,
-                y0=min_age,
-                x1=max_age,
-                y1=max_age
-            )
-
-            st.plotly_chart(
-                fig_prediction,
-                use_container_width=True
-            )
-
-
-            # ------------------------------------------------
-            # RESIDUALS
-            # ------------------------------------------------
-
-            st.subheader("Residual Analysis")
-
-            residual_df = pd.DataFrame({
-                "Fitted Age": predictions,
-                "Residual": actual - predictions
-            })
-
-            fig_residual = px.scatter(
-                residual_df,
-                x="Fitted Age",
-                y="Residual",
-                title="Residuals vs Fitted Values"
-            )
-
-            fig_residual.add_hline(
-                y=0
-            )
-
-            st.plotly_chart(
-                fig_residual,
-                use_container_width=True
-            )
-
-
-            # ------------------------------------------------
-            # Q-Q PLOT
-            # ------------------------------------------------
-
-            st.subheader("Normal Q-Q Plot")
-
-            qq = sm.qqplot(
-                dashboard_model.resid,
-                line="45",
-                fit=True
-            )
-
-            st.pyplot(
-                qq.figure,
-                clear_figure=True
-            )
-
-
-            # ------------------------------------------------
-            # MODEL COEFFICIENTS
-            # ------------------------------------------------
-
-            st.subheader("Regression Coefficients")
-
-            coefficient_table = pd.DataFrame({
-                "Variable": dashboard_model.params.index,
-                "Coefficient": dashboard_model.params.values,
-                "P-value": dashboard_model.pvalues.values
-            })
-
-            coefficient_table["Coefficient"] = (
-                coefficient_table["Coefficient"]
-                .round(4)
-            )
-
-            coefficient_table["P-value"] = (
-                coefficient_table["P-value"]
-                .round(4)
-            )
-
-            st.dataframe(
-                coefficient_table,
-                use_container_width=True
-            )
-
-
-            # ------------------------------------------------
-            # MODEL SUMMARY
-            # ------------------------------------------------
-
-            with st.expander("Show full regression model summary"):
-
-                st.text(
-                    dashboard_model.summary().as_text()
+                st.subheader(
+                    "Actual vs Predicted Age"
                 )
 
 
-            st.warning(
-                """
-                This regression uses Age as the dependent variable because
-                the available ANC register does not contain a reliably linked
-                validated maternal or neonatal adverse-outcome variable.
-                Therefore, the model should be presented as exploratory
-                statistical analysis rather than clinical risk prediction.
-                """
-            )
+                prediction_df = pd.DataFrame({
+                    "Actual Age": actual,
+                    "Predicted Age": predictions
+                })
 
 
-        except Exception as e:
-
-            st.error(
-                f"Regression analysis could not be displayed: {e}"
-            )
-
-
-
-# FOOTER
+                fig = px.scatter(
+                    prediction_df,
+                    x="Actual Age",
+                    y="Predicted Age",
+                    title="Actual vs Predicted Age"
+                )
 
 
-st.markdown("---")
+                min_age = min(
+                    prediction_df["Actual Age"].min(),
+                    prediction_df["Predicted Age"].min()
+                )
 
-st.caption(
-    "Wananchi Hospital ANC Dashboard | Exploratory academic/research tool | "
-    "Not a clinical diagnostic system"
-)
+                max_age = max(
+                    prediction_df["Actual Age"].max(),
+                    prediction_df["Predicted Age"].max()
+                )
+
+
+                fig.add_shape(
+                    type="line",
+                    x0=min_age,
+                    y0=min_age,
+                    x1=max_age,
+                    y1=max_age
+                )
+
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+
+
+                st.subheader(
+                    "Residuals"
+                )
+
+
+                residual_df = pd.DataFrame({
+                    "Predicted Age": predictions,
+                    "Residual": actual - predictions
+                })
+
+
+                fig = px.scatter(
+                    residual_df,
+                    x="Predicted Age",
+                    y="Residual",
+                    title="Residuals vs Predicted Age"
+                )
+
+                fig.add_hline(y=0)
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+
+
+                st.subheader(
+                    "Regression Coefficients"
+                )
+
+
+                coefficients = pd.DataFrame({
+                    "Variable":
+                        dashboard_model.params.index,
+
+                    "Coefficient":
+                        dashboard_model.params.values,
+
+                    "P-value":
+                        dashboard_model.pvalues.values
+                })
+
+
+                st.dataframe(
+                    coefficients,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+
+                with st.expander(
+                    "Model summary"
+                ):
+
+                    st.text(
+                        dashboard_model.summary()
+                    )
+
+
+                st.warning(
+                    "Interpretation: the regression is exploratory. "
+                    "The R² value indicates the proportion of variation "
+                    "in recorded age explained by the included variables "
+                    "in this sample; it does not establish clinical risk "
+                    "or causation. A validated adverse maternal or neonatal "
+                    "outcome was not available for reliable linkage in "
+                    "the ANC register."
+                )
+
+
+            except Exception as e:
+
+                st.error(
+                    "The regression could not be fitted with the available "
+                    f"data. Technical detail: {e}"
+                )
