@@ -797,33 +797,28 @@ with tab5:
         # ----------------------------------------------------
 
         regression_variables = [
-            "Age",
-            "Parity_clean",
-            "Gravidity",
-            "Gestation Weeks",
-            "Visit Count",
-            "Weight (kg)",
-            "Systolic BP",
-            "Diastolic BP",
-            "Year"
-        ]
+    "Age",
+    "Parity_clean",
+    "Gravidity",
+    "Gestation Weeks",
+    "Visit Count",
+    "Weight (kg)",
+    "Systolic BP",
+    "Diastolic BP",
+    "Year"
+]
 
-        available_variables = [
-            col for col in regression_variables
-            if col in df.columns
-        ]
+reg_df = df[regression_variables].copy()
 
-        regression_df = (
-            df[available_variables]
-            .dropna()
-            .copy()
-        )
+# Ensure numeric variables are actually numeric
+for col in regression_variables:
+    reg_df[col] = pd.to_numeric(reg_df[col], errors="coerce")
 
-        regression_df["Year_2026"] = (
-            regression_df["Year"] == 2026
-        ).astype(int)
+# Create the 2026 indicator
+reg_df["Year_2026"] = (reg_df["Year"] == 2026).astype(int)
 
-
+# Keep complete cases for the regression
+reg_df = reg_df.dropna()
         # ----------------------------------------------------
         # DISPLAY MODEL METRICS
         # ----------------------------------------------------
@@ -832,14 +827,16 @@ with tab5:
         try:
 
             formula_test = """
-            Age ~ Parity_clean
-                 + Gravidity
-                 + Q('Gestation Weeks')
-                 + Q('Visit Count')
-                 + Q('Weight (kg)')
-                 + Q('Systolic BP')
-                 + Q('Diastolic BP')
-                 + Year_2026
+formula = """
+Age ~ Parity_clean
+     + Gravidity
+     + Q('Gestation Weeks')
+     + Q('Visit Count')
+     + Q('Weight (kg)')
+     + Q('Systolic BP')
+     + Q('Diastolic BP')
+     + Year_2026
+"""
             """
 
             # Refit only to obtain consistent dashboard evaluation
