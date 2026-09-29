@@ -59,6 +59,35 @@ def load_model():
 
 
 df = load_data()
+# Recreate cleaned parity variables for the deployed dataset
+if "Parity" in df.columns:
+    df["Parity_original"] = df["Parity"].astype(str).str.strip()
+
+    df["Parity_clean"] = (
+        df["Parity_original"]
+        .str.extract(r"^(\d+)", expand=False)
+    )
+
+    df["Parity_clean"] = pd.to_numeric(
+        df["Parity_clean"],
+        errors="coerce"
+    )
+
+    def create_parity_group(x):
+        if pd.isna(x):
+            return pd.NA
+        if x == 0:
+            return "0"
+        elif x == 1:
+            return "1"
+        elif x == 2:
+            return "2"
+        else:
+            return "3+"
+
+    df["Parity_Group"] = df["Parity_clean"].apply(
+        create_parity_group
+    )
 age_model = load_model()
 def calculate_monitoring(row):
     score = 0
