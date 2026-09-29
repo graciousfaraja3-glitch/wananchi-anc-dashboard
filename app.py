@@ -27,7 +27,27 @@ st.set_page_config(
 
 @st.cache_data
 def load_data():
-    return pd.read_csv("wananchi_anc_data.csv")
+    df = pd.read_csv("wananchi_anc_data.csv")
+
+    numeric_columns = [
+        "Year",
+        "Age",
+        "Parity_clean",
+        "Gravidity",
+        "Gestation Weeks",
+        "Visit Count",
+        "Weight (kg)",
+        "Systolic BP",
+        "Diastolic BP",
+        "IPT Doses",
+        "Monitoring_Score"
+    ]
+
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df
 
 
 @st.cache_resource
