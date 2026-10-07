@@ -1,7 +1,7 @@
 import base64
 import html
 import os
-import re
+import res
 import warnings
 from datetime import date
 
