@@ -668,6 +668,11 @@ def require_password():
 
 
 require_password()
+@st.cache_data
+def load_data(path, modified_time):
+    # modified_time is part of the cache key, so replacing the CSV
+    # refreshes the dashboard without restarting the app.
+    return pd.read_csv(path)
 
 @st.cache_data
 def prepare_data(raw):
@@ -728,7 +733,35 @@ def prepare_data(raw):
             data["Monitoring_Category"].fillna("Not assigned")
         )
     return data
+    if not os.path.exists(DATA_FILE):
+    st.error(
+        f"The data file '{DATA_FILE}' was not found. Place it in the same "
+        "folder as app.py and reload the page."
+    )
+    st.stop()
 
+try:
+    raw_df = load_data(DATA_FILE, os.path.getmtime(DATA_FILE))
+except Exception as error:
+    st.error(f"The data file could not be read: {error}")
+    st.stop()
+
+missing_columns = [c for c in REQUIRED_COLUMNS if c not in raw_df.columns]
+if missing_columns:
+    st.error(
+        "The data file is missing required column(s): "
+        + ", ".join(missing_columns)
+    )
+    st.stop()
+
+df = prepare_data(raw_df)
+original_columns = [c for c in raw_df.columns if c in df.columns]
+
+years = sorted(df["Year"].unique())
+YEAR_COLORS = {
+    str(y): COLORWAY[i % len(COLORWAY)] for i, y in enumerate(years)
+}
+YEAR_SEQUENCE = [YEAR_COLORS[str(y)] for y in years]
 
 if not os.path.exists(DATA_FILE):
     st.error(
@@ -736,6 +769,7 @@ if not os.path.exists(DATA_FILE):
         "folder as app.py and reload the page."
     )
     st.stop()
+    
 
 
 # ============================================================
