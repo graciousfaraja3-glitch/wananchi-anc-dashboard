@@ -688,6 +688,20 @@ def prepare_data(raw):
     data["Year"] = pd.to_numeric(data["Year"], errors="coerce")
     data = data.dropna(subset=["Year"]).copy()
     data["Year"] = data["Year"].astype(int)
+    # Convert numerical ANC variables to numeric
+numeric_columns = [
+    "Age",
+    "Visit Count",
+    "Systolic BP",
+    "Diastolic BP",
+    "Weight (kg)",
+    "Gestation Weeks",
+    "Gravidity",
+]
+
+for col in numeric_columns:
+    if col in data.columns:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
 
     age_group = pd.cut(
         data["Age"],
