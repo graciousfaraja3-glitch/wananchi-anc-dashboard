@@ -1875,18 +1875,32 @@ with tab_regression:
 
         st.subheader("Normal Q-Q Plot")
 
-        qq_fig = sm.qqplot(reg["resid"], line="45", fit=True)
-        qq_fig.set_facecolor("white")
-        qq_ax = qq_fig.axes[0]
-        qq_ax.set_facecolor("white")
-        qq_ax.title.set_color(BLUE_DARK)
-        for line in qq_ax.get_lines():
-            if line.get_linestyle() == "None" or line.get_marker() != "None":
-                line.set_markerfacecolor(BLUE)
-                line.set_markeredgecolor(BLUE)
-            else:
-                line.set_color(RED)
-        st.pyplot(qq_fig, clear_figure=True)
+                st.subheader("Normal Q-Q Plot")
+
+        from scipy import stats
+
+        resid = np.asarray(reg["resid"])
+        (theoretical, ordered), (slope, intercept, _) = stats.probplot(
+            resid, dist="norm"
+        )
+        fig_qq = go.Figure()
+        fig_qq.add_trace(go.Scatter(
+            x=theoretical, y=ordered, mode="markers",
+            marker=dict(color=BLUE), name="Residuals"
+        ))
+        fig_qq.add_trace(go.Scatter(
+            x=[theoretical.min(), theoretical.max()],
+            y=[slope * theoretical.min() + intercept,
+               slope * theoretical.max() + intercept],
+            mode="lines", line=dict(color=RED, dash="dash"),
+            name="Reference line"
+        ))
+        fig_qq.update_layout(
+            title="Normal Q-Q Plot of Residuals",
+            xaxis_title="Theoretical quantiles",
+            yaxis_title="Sample quantiles"
+        )
+        show_chart(fig_qq, key="reg_qq")
 
         st.subheader("Regression Coefficients")
 
