@@ -1875,7 +1875,7 @@ with tab_regression:
 
         st.subheader("Normal Q-Q Plot")
 
-                st.subheader("Normal Q-Q Plot")
+        st.subheader("Normal Q-Q Plot")
 
         from scipy import stats
 
