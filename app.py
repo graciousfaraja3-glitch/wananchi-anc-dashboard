@@ -733,7 +733,7 @@ def prepare_data(raw):
             data["Monitoring_Category"].fillna("Not assigned")
         )
     return data
-    if not os.path.exists(DATA_FILE):
+if not os.path.exists(DATA_FILE):
     st.error(
         f"The data file '{DATA_FILE}' was not found. Place it in the same "
         "folder as app.py and reload the page."
