@@ -739,10 +739,7 @@ for col in numeric_columns:
         data["Monitoring_Category"] = (
             data["Monitoring_Category"].fillna("Not assigned")
         )
-
     return data
-
-
 if not os.path.exists(DATA_FILE):
     st.error(
         f"The data file '{DATA_FILE}' was not found. Place it in the same "
